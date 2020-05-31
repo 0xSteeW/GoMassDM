@@ -14,7 +14,7 @@ import (
 func input(reader *bufio.Reader) string {
 	raw, err := reader.ReadString('\n')
 	if err != nil {
-		logErr("Something went wrong when reading stdin: " + err.Error())
+		log.Println("Something went wrong when reading stdin: " + err.Error())
 		return ""
 	}
 	switch runtime.GOOS {
