@@ -90,8 +90,12 @@ func massDM(client *discordgo.Session, ignore []*discordgo.Guild, message string
 	log.Println("Getting all users...")
 	users := getAllUsers(client, ignore, path)
 
+	var count int
 	for _, user := range users {
-		fmt.Println("Attempting to DM: " + user.String())
+		log.Println("Cooldown... ")
+		time.Sleep(4 * time.Second)
+		fmt.Println("Attempting to DM: "+user.String(), count, "/", len(users))
+		count += 1
 		channelDM, err := client.UserChannelCreate(user.ID)
 		if err != nil {
 			log.Println("Could not create DM channel with: " + user.String())
@@ -176,7 +180,7 @@ func getAllUsers(client *discordgo.Session, ignore []*discordgo.Guild, path stri
 	for _, guild := range allGuilds {
 		log.Println("Working with: " + guild.Name)
 		// Ignore this guild
-		if len(ignore) != 0 && checkIgnore(guild, allGuilds) {
+		if len(ignore) > 0 && checkIgnore(guild, allGuilds) {
 			log.Println("Ignoring " + guild.Name)
 			continue
 		}
