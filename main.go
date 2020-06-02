@@ -6,10 +6,13 @@ import (
 	"log"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
 )
+
+var Chunk *discordgo.GuildMembersChunk
 
 func input(reader *bufio.Reader) string {
 	raw, err := reader.ReadString('\n')
@@ -40,6 +43,7 @@ func main() {
 		return
 	}
 	// Attempt to open session if no errors have ocurred
+	client.AddHandler(guildMembersChunk)
 	err = client.Open()
 	if err != nil {
 		log.Println("Could not open session: " + err.Error())
@@ -72,11 +76,18 @@ func main() {
 	massDM(client, ignoreGuilds, message)
 }
 
+func guildMembersChunk(client *discordgo.Session, chunk *discordgo.GuildMembersChunk) {
+	fmt.Println("RECEIVED CHUNK")
+	Chunk = chunk
+}
+
 // Main DM function
 func massDM(client *discordgo.Session, ignore []*discordgo.Guild, message string) {
+	log.Println("Getting all users...")
 	users := getAllUsers(client, ignore)
 
 	for _, user := range users {
+		fmt.Println("Attempting to DM: " + user.String())
 		channelDM, err := client.UserChannelCreate(user.ID)
 		if err != nil {
 			log.Println("Could not create DM channel with: " + user.String())
@@ -122,22 +133,51 @@ func checkIgnore(guild *discordgo.Guild, guilds []*discordgo.Guild) bool {
 }
 
 func getAllUsers(client *discordgo.Session, ignore []*discordgo.Guild) []*discordgo.User {
+	log.Println("Getting all guilds...")
 	var massList []*discordgo.User
 	var guildUsers []*discordgo.User
 	allGuilds := getAllGuilds(client)
 	for _, guild := range allGuilds {
+		log.Println("Working with: " + guild.Name)
 		// Ignore this guild
-		if checkIgnore(guild, allGuilds) {
+		// if checkIgnore(guild, allGuilds) {
+		//	continue
+		// }
+		// guildUsers = batchUserList(client, guild.ID)
+		// members, err := client.GuildMembers(guild.ID, "", 5)
+		/*if err != nil {
+			log.Println("Could not get users of guild: " + guild.Name)
+			log.Println(err)
 			continue
 		}
+		guildUsers = membersToUsers(members)*/
 		guildUsers = membersToUsers(guild.Members)
+		// guildUsers = membersToUsers(guild.Members)
+		log.Println("This server has: " + strconv.Itoa(len(guildUsers)) + " users.")
 		for _, user := range guildUsers {
-			if !checkRepeated(user, massList) {
-				massList = append(massList, user)
+			log.Println("Working with user: " + user.String())
+			//if !checkRepeated(user, massList) && user.ID != client.State.User.ID && !user.Bot {
+			if user.ID == client.State.User.ID {
+				continue
 			}
+			log.Println("Added user to MassDM list: " + user.String())
+			massList = append(massList, user)
+			//}
 		}
 	}
 	return massList
+}
+
+func batchUserList(client *discordgo.Session, guildID string) []*discordgo.User {
+	err := client.RequestGuildMembers(guildID, "", 0)
+	if err != nil {
+		log.Println(err)
+		return nil
+	}
+	if Chunk == nil {
+		return nil
+	}
+	return membersToUsers(Chunk.Members)
 }
 
 func formatGuildsToString(guilds []*discordgo.Guild) string {
