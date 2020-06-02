@@ -3,16 +3,18 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
 
-var Chunk *discordgo.GuildMembersChunk
+var Chunk []*discordgo.Member
 
 func input(reader *bufio.Reader) string {
 	raw, err := reader.ReadString('\n')
@@ -70,21 +72,23 @@ func main() {
 		}
 	}
 	fmt.Println("I will ignore these guilds: " + formatGuildsToString(ignoreGuilds))
+	fmt.Println("Please input characters file (leave blank for default)")
+	path := input(reader)
 	fmt.Println("Proceeding to MassDM")
 
 	// Call main DM function
-	massDM(client, ignoreGuilds, message)
+	massDM(client, ignoreGuilds, message, path)
 }
 
 func guildMembersChunk(client *discordgo.Session, chunk *discordgo.GuildMembersChunk) {
-	fmt.Println("RECEIVED CHUNK")
-	Chunk = chunk
+	fmt.Println("Received chunk... ", len(chunk.Members), " users.")
+	Chunk = append(Chunk, chunk.Members...)
 }
 
 // Main DM function
-func massDM(client *discordgo.Session, ignore []*discordgo.Guild, message string) {
+func massDM(client *discordgo.Session, ignore []*discordgo.Guild, message string, path string) {
 	log.Println("Getting all users...")
-	users := getAllUsers(client, ignore)
+	users := getAllUsers(client, ignore, path)
 
 	for _, user := range users {
 		fmt.Println("Attempting to DM: " + user.String())
@@ -103,6 +107,9 @@ func massDM(client *discordgo.Session, ignore []*discordgo.Guild, message string
 }
 
 func checkRepeated(user *discordgo.User, users []*discordgo.User) bool {
+	if len(users) == 0 {
+		return false
+	}
 	for _, userInList := range users {
 		if user.ID == userInList.ID {
 			return true
@@ -132,7 +139,36 @@ func checkIgnore(guild *discordgo.Guild, guilds []*discordgo.Guild) bool {
 	return false
 }
 
-func getAllUsers(client *discordgo.Session, ignore []*discordgo.Guild) []*discordgo.User {
+func getLetters(path string) []string {
+	var file *os.File
+	var err error
+	fmt.Println("Reading path:", path)
+	if path == "" {
+		path = "./characters.txt"
+	}
+	file, err = os.Open(path)
+	defer file.Close()
+	if err != nil {
+		log.Println("Characters file not valid.")
+		time.Sleep(5)
+		os.Exit(0)
+	}
+
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		log.Println("Error reading file: ", err)
+		time.Sleep(5)
+		os.Exit(0)
+	}
+	chars := strings.Split(string(content), "\n")
+	var finalChars []string
+	for _, char := range chars {
+		finalChars = append(finalChars, strings.ReplaceAll(char, "\n", ""))
+	}
+	return finalChars
+}
+
+func getAllUsers(client *discordgo.Session, ignore []*discordgo.Guild, path string) []*discordgo.User {
 	log.Println("Getting all guilds...")
 	var massList []*discordgo.User
 	var guildUsers []*discordgo.User
@@ -140,44 +176,38 @@ func getAllUsers(client *discordgo.Session, ignore []*discordgo.Guild) []*discor
 	for _, guild := range allGuilds {
 		log.Println("Working with: " + guild.Name)
 		// Ignore this guild
-		// if checkIgnore(guild, allGuilds) {
-		//	continue
-		// }
-		// guildUsers = batchUserList(client, guild.ID)
-		// members, err := client.GuildMembers(guild.ID, "", 5)
-		/*if err != nil {
-			log.Println("Could not get users of guild: " + guild.Name)
-			log.Println(err)
+		if len(ignore) != 0 && checkIgnore(guild, allGuilds) {
+			log.Println("Ignoring " + guild.Name)
 			continue
 		}
-		guildUsers = membersToUsers(members)*/
-		guildUsers = membersToUsers(guild.Members)
-		// guildUsers = membersToUsers(guild.Members)
+		for _, letter := range getLetters(path) {
+			fmt.Println("Waiting for user chunk... Letter ", letter)
+			batchUserList(client, guild.ID, strings.TrimSpace(letter))
+			time.Sleep(1 * time.Second)
+		}
+		guildUsers = membersToUsers(Chunk)
+		Chunk = nil
 		log.Println("This server has: " + strconv.Itoa(len(guildUsers)) + " users.")
 		for _, user := range guildUsers {
 			log.Println("Working with user: " + user.String())
-			//if !checkRepeated(user, massList) && user.ID != client.State.User.ID && !user.Bot {
-			if user.ID == client.State.User.ID {
-				continue
+			if !checkRepeated(user, massList) && user.ID != client.State.User.ID && !user.Bot {
+				log.Println("Added user to MassDM list: " + user.String())
+				massList = append(massList, user)
 			}
-			log.Println("Added user to MassDM list: " + user.String())
-			massList = append(massList, user)
-			//}
 		}
 	}
 	return massList
 }
 
-func batchUserList(client *discordgo.Session, guildID string) []*discordgo.User {
-	err := client.RequestGuildMembers(guildID, "", 0)
+// Hardcoded function to prevent discord from blocking requests
+
+func batchUserList(client *discordgo.Session, guildID string, letter string) {
+	fmt.Println("Asking discord for members of guild: " + guildID)
+	err := client.RequestGuildMembers(guildID, letter, 0)
 	if err != nil {
 		log.Println(err)
-		return nil
+		return
 	}
-	if Chunk == nil {
-		return nil
-	}
-	return membersToUsers(Chunk.Members)
 }
 
 func formatGuildsToString(guilds []*discordgo.Guild) string {
